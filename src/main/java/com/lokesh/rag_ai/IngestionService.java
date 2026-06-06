@@ -2,65 +2,67 @@ package com.lokesh.rag_ai;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.SearchRequest;
+
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+
+import java.util.List;
+
 @Component
 public class IngestionService implements CommandLineRunner {
 
-    // Logger object for logging messages
-    private static final Logger log =
-            LoggerFactory.getLogger(IngestionService.class);
+    private static final Logger log = LoggerFactory.getLogger(IngestionService.class);
 
-    // Spring AI Vector Store
-    // Used to save document embeddings
     private final VectorStore vectorStore;
 
-    // Constructor Injection
-    // Spring automatically injects the configured VectorStore bean
+
     public IngestionService(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
     }
 
-    // Automatically executes when application starts
     @Override
     public void run(String... args) throws Exception {
 
-        // Step 1:
-        // Read PDF file from resources/docs folder
-        PagePdfDocumentReader pdfReader =
-                new PagePdfDocumentReader(
-                        new ClassPathResource("docs/Lokesh_Introduction.pdf"));
+        // ✅ Check if vector store is already populated to avoid duplicate ingestion
+        List<Document> existing = vectorStore.similaritySearch(
+                SearchRequest.builder()
+                        .query("Lokesh")
+                        .topK(1)
+                        .build()
+        );
 
-        // Step 2:
-        // Convert PDF into a list of Documents
-        // Each page becomes a Document object
+        if (!existing.isEmpty()) {
+            log.info("Vector store already populated. Skipping ingestion.");
+            return;
+        }
+
+        log.info("Vector store empty. Starting ingestion...");
+
+        // Step 1: Read PDF
+        PagePdfDocumentReader pdfReader =
+                new PagePdfDocumentReader(new ClassPathResource("docs/Lokesh_Introduction.pdf"));
+
+        // Step 2: Get documents (one per page)
         var documents = pdfReader.get();
 
-        // Step 3:
-        // Split large documents into smaller chunks
-        // Chunk size = 800 tokens
-        var textSplitter = TokenTextSplitter.builder()
+        // Step 3 & 4: Split into chunks of 800 tokens
+        var splitDocuments = TokenTextSplitter.builder()
                 .withChunkSize(800)
-                .build();
+                .build()
+                .apply(documents);
 
-        // Step 4:
-        // Apply splitter to documents
-        // Result = many smaller chunks
-        var splitDocuments = textSplitter.apply(documents);
-
-        
-        // Step 5:
-        // Generate embeddings and store them
-        // in the configured vector database
+        // Step 5: Embed and store
         vectorStore.add(splitDocuments);
 
-        // Step 6:
-        // Log success message
-        log.info("Vector store loaded successfully!");
+        log.info("Vector store loaded successfully! {} chunks stored.", splitDocuments.size());
+
     }
 }
